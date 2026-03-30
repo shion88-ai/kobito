@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="こびと探し">
+<meta name="theme-color" content="#1a2e1a">
+<title>こびと探し</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Zen+Kurenaido&family=Kaisei+Opti:wght@400;700&display=swap');
+
+- { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+–moss: #3a5a2a;
+–bark: #6b4c2a;
+–leaf: #7ab648;
+–dirt: #a0784a;
+–fog: rgba(200,220,180,0.15);
+–glow: #c8e87a;
+}
+
+body {
+font-family: ‘Zen Kurenaido’, sans-serif;
+background: #0d1a0d;
+color: #d4e8b0;
+height: 100dvh;
+overflow: hidden;
+user-select: none;
+-webkit-user-select: none;
+}
+
+/* ===== CAMERA ===== */
+#camera-view {
+position: fixed;
+inset: 0;
+width: 100%;
+height: 100%;
+object-fit: cover;
+z-index: 0;
+}
+
+#camera-overlay {
+position: fixed;
+inset: 0;
+background: linear-gradient(to bottom, rgba(10,20,5,0.3) 0%, transparent 30%, transparent 70%, rgba(10,20,5,0.5) 100%);
+z-index: 1;
+pointer-events: none;
+}
+
+/* vignette & noise */
+#camera-overlay::after {
+content: ‘’;
+position: absolute;
+inset: 0;
+background-image: url(“data:image/svg+xml,%3Csvg viewBox=‘0 0 200 200’ xmlns=‘http://www.w3.org/2000/svg’%3E%3Cfilter id=‘n’%3E%3CfeTurbulence type=‘fractalNoise’ baseFrequency=‘0.75’ numOctaves=‘4’ stitchTiles=‘stitch’/%3E%3C/filter%3E%3Crect width=‘100%25’ height=‘100%25’ filter=‘url(%23n)’ opacity=‘0.04’/%3E%3C/svg%3E”);
+opacity: 0.3;
+pointer-events: none;
+}
+
+/* ===== AR STAGE ===== */
+#ar-stage {
+position: fixed;
+inset: 0;
+z-index: 2;
+pointer-events: none;
+}
+
+/* ===== KOBITO ===== */
+.kobito {
+position: absolute;
+cursor: pointer;
+pointer-events: all;
+transform-origin: bottom center;
+transition: filter 0.3s;
+filter: drop-shadow(0 4px 8px rgba(0,0,0,0.6));
+}
+
+.kobito:active { transform: scale(0.9) !important; }
+
+.kobito svg { display: block; }
+
+/* Behavior animations */
+@keyframes peek {
+0%,100% { transform: translateY(60%) scaleY(0.4); }
+30%,70% { transform: translateY(30%) scaleY(1); }
+50% { transform: translateY(25%) scaleY(1) rotate(5deg); }
+}
+@keyframes walk {
+0% { transform: translateX(0) scaleX(1); }
+49% { transform: translateX(var(–walk-dist)) scaleX(1); }
+50% { transform: translateX(var(–walk-dist)) scaleX(-1); }
+99% { transform: translateX(0) scaleX(-1); }
+100% { transform: translateX(0) scaleX(1); }
+}
+@keyframes hide-grass {
+0%,100% { transform: translateY(70%); opacity: 0.3; }
+20%,80% { transform: translateY(0); opacity: 1; }
+45%,55% { transform: translateY(0) rotate(-3deg); opacity: 1; }
+}
+@keyframes float {
+0%,100% { transform: translateY(0) rotate(-2deg); }
+50% { transform: translateY(-12px) rotate(2deg); }
+}
+@keyframes tremble {
+0%,100% { transform: rotate(0deg); }
+25% { transform: rotate(-4deg) translateX(-2px); }
+75% { transform: rotate(4deg) translateX(2px); }
+}
+@keyframes caught-pop {
+0% { transform: scale(1); opacity: 1; }
+30% { transform: scale(1.4); opacity: 1; }
+60% { transform: scale(0.8) rotate(20deg); opacity: 0.5; }
+100% { transform: scale(0) rotate(40deg); opacity: 0; }
+}
+@keyframes spawn-in {
+0% { opacity: 0; transform: scale(0.3); }
+60% { transform: scale(1.15); }
+100% { opacity: 1; transform: scale(1); }
+}
+.spawn-anim { animation: spawn-in 0.6s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+.caught-anim { animation: caught-pop 0.5s ease-in forwards; pointer-events: none; }
+
+/* ===== UI FRAME ===== */
+#ui-top {
+position: fixed;
+top: 0; left: 0; right: 0;
+z-index: 10;
+padding: env(safe-area-inset-top, 12px) 16px 12px;
+display: flex;
+align-items: center;
+justify-content: space-between;
+background: linear-gradient(to bottom, rgba(10,25,5,0.75), transparent);
+}
+
+#app-title {
+font-family: ‘Kaisei Opti’, serif;
+font-size: 1.4rem;
+font-weight: 700;
+color: var(–glow);
+text-shadow: 0 0 20px rgba(200,232,122,0.6);
+letter-spacing: 0.05em;
+}
+
+#zukan-btn {
+background: rgba(58,90,42,0.7);
+border: 1.5px solid rgba(122,182,72,0.5);
+color: var(–glow);
+font-family: ‘Zen Kurenaido’, sans-serif;
+font-size: 0.85rem;
+padding: 6px 14px;
+border-radius: 20px;
+cursor: pointer;
+backdrop-filter: blur(8px);
+display: flex;
+align-items: center;
+gap: 6px;
+transition: background 0.2s, border-color 0.2s;
+}
+#zukan-btn:active { background: rgba(58,90,42,0.95); }
+
+#kobito-count {
+background: var(–leaf);
+color: #1a2e0a;
+font-weight: bold;
+border-radius: 10px;
+padding: 1px 7px;
+font-size: 0.8rem;
+}
+
+/* ===== BOTTOM STATUS ===== */
+#status-bar {
+position: fixed;
+bottom: 0; left: 0; right: 0;
+z-index: 10;
+padding: 12px 20px calc(env(safe-area-inset-bottom, 8px) + 10px);
+display: flex;
+flex-direction: column;
+align-items: center;
+gap: 6px;
+background: linear-gradient(to top, rgba(10,25,5,0.8), transparent);
+pointer-events: none;
+}
+
+#hint-text {
+font-size: 0.82rem;
+color: rgba(200,232,122,0.75);
+text-align: center;
+text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+transition: opacity 0.5s;
+letter-spacing: 0.03em;
+}
+
+#radar {
+display: flex;
+gap: 5px;
+align-items: center;
+}
+.radar-dot {
+width: 6px; height: 6px;
+border-radius: 50%;
+background: var(–glow);
+opacity: 0.3;
+animation: radar-pulse 2s infinite;
+}
+.radar-dot:nth-child(2) { animation-delay: 0.3s; }
+.radar-dot:nth-child(3) { animation-delay: 0.6s; }
+@keyframes radar-pulse {
+0%,100% { opacity: 0.2; transform: scale(1); }
+50% { opacity: 1; transform: scale(1.4); }
+}
+
+/* ===== CATCH FLASH ===== */
+#catch-flash {
+position: fixed;
+inset: 0;
+z-index: 20;
+background: rgba(200,232,122,0.25);
+opacity: 0;
+pointer-events: none;
+transition: opacity 0.1s;
+}
+#catch-flash.flash { opacity: 1; }
+
+/* ===== CATCH POPUP ===== */
+#catch-popup {
+position: fixed;
+inset: 0;
+z-index: 30;
+display: flex;
+align-items: center;
+justify-content: center;
+background: rgba(5,15,5,0.6);
+backdrop-filter: blur(4px);
+opacity: 0;
+pointer-events: none;
+transition: opacity 0.3s;
+}
+#catch-popup.show { opacity: 1; pointer-events: all; }
+
+#catch-card {
+background: linear-gradient(135deg, rgba(30,50,20,0.95), rgba(15,30,10,0.98));
+border: 1.5px solid rgba(122,182,72,0.4);
+border-radius: 20px;
+padding: 28px 24px 20px;
+text-align: center;
+max-width: 280px;
+width: 85%;
+box-shadow: 0 20px 60px rgba(0,0,0,0.7), inset 0 1px 0 rgba(200,232,122,0.1);
+animation: card-appear 0.4s cubic-bezier(0.34,1.56,0.64,1);
+}
+@keyframes card-appear {
+0% { transform: scale(0.7) translateY(30px); opacity: 0; }
+100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+#catch-icon { font-size: 3.5rem; margin-bottom: 6px; display: block; }
+#catch-name {
+font-family: ‘Kaisei Opti’, serif;
+font-size: 1.4rem;
+color: var(–glow);
+margin-bottom: 4px;
+}
+#catch-desc {
+font-size: 0.8rem;
+color: rgba(180,210,140,0.8);
+line-height: 1.6;
+margin-bottom: 16px;
+}
+#catch-new-badge {
+display: inline-block;
+background: var(–leaf);
+color: #1a2e0a;
+font-size: 0.72rem;
+font-weight: bold;
+padding: 2px 10px;
+border-radius: 20px;
+margin-bottom: 10px;
+letter-spacing: 0.05em;
+}
+#catch-close {
+width: 100%;
+background: rgba(58,90,42,0.8);
+border: 1px solid rgba(122,182,72,0.4);
+color: var(–glow);
+font-family: ‘Zen Kurenaido’, sans-serif;
+font-size: 0.95rem;
+padding: 10px;
+border-radius: 12px;
+cursor: pointer;
+transition: background 0.2s;
+}
+#catch-close:active { background: rgba(88,130,62,0.95); }
+
+/* ===== ZUKAN PANEL ===== */
+#zukan-panel {
+position: fixed;
+inset: 0;
+z-index: 40;
+background: linear-gradient(160deg, #0d1a0d, #111e0a);
+transform: translateY(100%);
+transition: transform 0.4s cubic-bezier(0.22,1,0.36,1);
+overflow-y: auto;
+-webkit-overflow-scrolling: touch;
+}
+#zukan-panel.open { transform: translateY(0); }
+
+#zukan-header {
+position: sticky;
+top: 0;
+background: rgba(13,26,13,0.95);
+backdrop-filter: blur(10px);
+padding: calc(env(safe-area-inset-top, 12px) + 12px) 20px 14px;
+display: flex;
+align-items: center;
+justify-content: space-between;
+border-bottom: 1px solid rgba(122,182,72,0.2);
+z-index: 1;
+}
+
+#zukan-title {
+font-family: ‘Kaisei Opti’, serif;
+font-size: 1.3rem;
+color: var(–glow);
+}
+
+#zukan-close {
+background: rgba(58,90,42,0.5);
+border: 1px solid rgba(122,182,72,0.3);
+color: var(–glow);
+font-size: 1rem;
+width: 36px; height: 36px;
+border-radius: 50%;
+cursor: pointer;
+display: flex; align-items: center; justify-content: center;
+}
+
+#zukan-grid {
+display: grid;
+grid-template-columns: repeat(3, 1fr);
+gap: 10px;
+padding: 16px;
+padding-bottom: calc(env(safe-area-inset-bottom, 16px) + 16px);
+}
+
+.zukan-cell {
+background: rgba(20,38,14,0.8);
+border: 1px solid rgba(122,182,72,0.15);
+border-radius: 14px;
+padding: 12px 8px;
+text-align: center;
+cursor: pointer;
+transition: border-color 0.2s, background 0.2s;
+position: relative;
+}
+.zukan-cell.found {
+border-color: rgba(122,182,72,0.4);
+background: rgba(30,55,18,0.8);
+}
+.zukan-cell.found:active { background: rgba(45,75,25,0.95); }
+
+.zukan-cell-icon { font-size: 2.2rem; display: block; margin-bottom: 4px; }
+.zukan-cell-name {
+font-size: 0.72rem;
+color: rgba(180,210,140,0.9);
+line-height: 1.3;
+}
+.zukan-cell:not(.found) .zukan-cell-icon { filter: grayscale(1) brightness(0.3); }
+.zukan-cell:not(.found) .zukan-cell-name { color: rgba(120,140,100,0.5); }
+
+.zukan-count-badge {
+position: absolute;
+top: 6px; right: 6px;
+background: var(–moss);
+color: var(–glow);
+font-size: 0.6rem;
+border-radius: 8px;
+padding: 1px 5px;
+display: none;
+}
+.zukan-cell.found .zukan-count-badge { display: block; }
+
+#zukan-progress {
+padding: 12px 16px 4px;
+font-size: 0.78rem;
+color: rgba(180,210,140,0.7);
+text-align: center;
+}
+
+/* ===== NO CAMERA ===== */
+#no-camera {
+position: fixed;
+inset: 0;
+z-index: 50;
+background: #0d1a0d;
+display: none;
+flex-direction: column;
+align-items: center;
+justify-content: center;
+text-align: center;
+padding: 40px 30px;
+gap: 16px;
+}
+#no-camera.show { display: flex; }
+#no-camera .icon { font-size: 3rem; }
+#no-camera p { color: rgba(180,210,140,0.8); line-height: 1.7; font-size: 0.9rem; }
+#no-camera button {
+background: var(–moss);
+border: 1px solid rgba(122,182,72,0.4);
+color: var(–glow);
+font-family: ‘Zen Kurenaido’, sans-serif;
+padding: 10px 24px;
+border-radius: 20px;
+font-size: 0.95rem;
+cursor: pointer;
+margin-top: 8px;
+}
+
+/* ===== SCANNING LINE ===== */
+#scan-line {
+position: fixed;
+left: 0; right: 0;
+height: 2px;
+background: linear-gradient(to right, transparent, rgba(200,232,122,0.3), transparent);
+z-index: 3;
+pointer-events: none;
+animation: scan 4s linear infinite;
+opacity: 0.5;
+}
+@keyframes scan {
+0% { top: 0%; }
+100% { top: 100%; }
+}
+</style>
+
+</head>
+<body>
+
+<video id="camera-view" autoplay playsinline muted></video>
+
+<div id="camera-overlay"></div>
+<div id="scan-line"></div>
+<div id="ar-stage"></div>
+
+<div id="ui-top">
+  <div id="app-title">🌿 こびと探し</div>
+  <button id="zukan-btn">
+    📖 図鑑
+    <span id="kobito-count">0</span>
+  </button>
+</div>
+
+<div id="status-bar">
+  <div id="radar">
+    <div class="radar-dot"></div>
+    <div class="radar-dot"></div>
+    <div class="radar-dot"></div>
+  </div>
+  <div id="hint-text">あたりをゆっくり見まわしてみよう…</div>
+</div>
+
+<div id="catch-flash"></div>
+
+<div id="catch-popup">
+  <div id="catch-card">
+    <span id="catch-icon">🐣</span>
+    <div id="catch-name">???</div>
+    <div id="catch-new-badge">はじめての発見！</div>
+    <div id="catch-desc">説明文</div>
+    <button id="catch-close">閉じる</button>
+  </div>
+</div>
+
+<div id="zukan-panel">
+  <div id="zukan-header">
+    <div id="zukan-title">📖 こびと図鑑</div>
+    <button id="zukan-close">✕</button>
+  </div>
+  <div id="zukan-progress"></div>
+  <div id="zukan-grid"></div>
+</div>
+
+<div id="no-camera">
+  <div class="icon">📷</div>
+  <p>カメラへのアクセスが必要です。<br>ブラウザの設定からカメラを許可してください。</p>
+  <button onclick="startCamera()">もう一度試す</button>
+</div>
+
+<script>
+// ===== KOBITO DATA =====
+const KOBITO_LIST = [
+  { id:'k1', name:'クサムラコビト', icon:'🍀', behavior:'hide', desc:'草むらの中でじっとしている。葉っぱと同じ色をしているのでとても見つけにくい。', rarity:1 },
+  { id:'k2', name:'コケムシャ',     icon:'🌿', behavior:'walk', desc:'コケの生えた石の上をすたすた歩く。急いでいるのかいつも小走りだ。', rarity:1 },
+  { id:'k3', name:'ツチカクレ',     icon:'🪨', behavior:'peek', desc:'土の中から顔だけ出してこちらを観察している。目が合うとすぐ引っ込む。', rarity:2 },
+  { id:'k4', name:'キノミ',         icon:'🍄', behavior:'float', desc:'きのこの傘の下でぶら下がって昼寝をしている。落ちないのが不思議だ。', rarity:2 },
+  { id:'k5', name:'ミジカアシ',     icon:'🐾', behavior:'walk', desc:'足が短くてちょこちょこ歩く。歩くたびに小さな足跡が残る。', rarity:1 },
+  { id:'k6', name:'カゼノリ',       icon:'🍃', behavior:'float', desc:'風に乗って空をふわふわ漂う。葉っぱを羽のように使っている。', rarity:3 },
+  { id:'k7', name:'ネムリゴロタ',   icon:'😴', behavior:'hide', desc:'石のふりをして眠っている。踏まないように要注意。', rarity:2 },
+  { id:'k8', name:'ヤブレカサ',     icon:'☂️', behavior:'peek', desc:'破れた葉っぱを傘にして雨宿りしている。雨の日によく見かける。', rarity:2 },
+  { id:'k9', name:'ヒカリムシ',     icon:'✨', behavior:'float', desc:'夜だけ光る珍しいこびと。昼間は光を消してどこかに潜んでいる。', rarity:4 },
+  { id:'k10',name:'マルコロ',       icon:'🪣', behavior:'walk', desc:'丸い体でころころ転がって移動する。坂道が大好物だ。', rarity:1 },
+  { id:'k11',name:'ミキノネコ',     icon:'🌰', behavior:'peek', desc:'木の幹の穴から顔を出す。どんぐりが大好きでよく頬袋に詰めている。', rarity:3 },
+  { id:'k12',name:'クモノス',       icon:'🕸️', behavior:'hide', desc:'蜘蛛の巣につかまって揺れている。自分で作った巣らしい。', rarity:4 },
+];
+
+// ===== STATE =====
+let found = {}; // { id: count }
+let activeKobito = [];
+let spawnTimer = null;
+let hintTimer = null;
+let catchPopupOpen = false;
+
+const hints = [
+  'あたりをゆっくり見まわしてみよう…',
+  '植物の近くを探してみて…',
+  '足元にも目を向けてみよう',
+  '動くものをよく見ると…',
+  'じっと待つと出てくるかも…',
+  '草むらをそっとのぞいてみて',
+];
+
+// ===== LOAD / SAVE =====
+function loadData() {
+  try { found = JSON.parse(localStorage.getItem('kobito_found') || '{}'); } catch(e) { found = {}; }
+}
+function saveData() {
+  try { localStorage.setItem('kobito_found', JSON.stringify(found)); } catch(e) {}
+}
+
+// ===== CAMERA =====
+async function startCamera() {
+  document.getElementById('no-camera').classList.remove('show');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    document.getElementById('camera-view').srcObject = stream;
+    startSpawning();
+    rotateHints();
+  } catch(e) {
+    document.getElementById('no-camera').classList.add('show');
+  }
+}
+
+// ===== SPAWN =====
+function getRandomKobito() {
+  // weighted by rarity
+  const pool = [];
+  KOBITO_LIST.forEach(k => {
+    const w = k.rarity === 1 ? 8 : k.rarity === 2 ? 5 : k.rarity === 3 ? 2 : 1;
+    for(let i=0;i<w;i++) pool.push(k);
+  });
+  return pool[Math.floor(Math.random()*pool.length)];
+}
+
+function spawnKobito() {
+  if(activeKobito.length >= 4) return;
+  const k = getRandomKobito();
+  const size = 50 + Math.random()*30;
+  const x = 8 + Math.random()*76; // % from left
+  const y = 25 + Math.random()*50; // % from top
+
+  const el = document.createElement('div');
+  el.className = 'kobito spawn-anim';
+  el.dataset.id = k.id;
+  el.style.left = x+'%';
+  el.style.top = y+'%';
+  el.style.width = size+'px';
+  el.style.height = size+'px';
+
+  // SVG kobito character
+  el.innerHTML = makeSVG(k, size);
+
+  // behavior
+  const behavior = k.behavior;
+  if(behavior === 'peek') {
+    el.style.overflow = 'hidden';
+    el.style.animation = `peek ${4+Math.random()*3}s ease-in-out infinite`;
+  } else if(behavior === 'walk') {
+    const dist = (Math.random()>0.5?1:-1)*(30+Math.random()*50);
+    el.style.setProperty('--walk-dist', dist+'px');
+    el.style.animation = `walk ${5+Math.random()*4}s linear infinite`;
+  } else if(behavior === 'float') {
+    el.style.animation = `float ${3+Math.random()*2}s ease-in-out infinite`;
+  } else {
+    el.style.animation = `hide-grass ${6+Math.random()*3}s ease-in-out infinite`;
+  }
+
+  el.addEventListener('click', ()=>catchKobito(el, k));
+
+  document.getElementById('ar-stage').appendChild(el);
+  activeKobito.push({ el, k, timer: setTimeout(()=>removeKobito(el,k), 8000+Math.random()*6000) });
+}
+
+function makeSVG(k, size) {
+  const s = size;
+  // Simple cute character SVGs based on kobito type
+  const colors = {
+    k1:'#5a8a3a', k2:'#4a7a4a', k3:'#8a7a5a', k4:'#8a5a3a',
+    k5:'#7a6a5a', k6:'#4a8a6a', k7:'#6a6a6a', k8:'#5a6a4a',
+    k9:'#8a7a2a', k10:'#8a5a4a', k11:'#7a5a3a', k12:'#5a5a6a'
+  };
+  const col = colors[k.id] || '#5a7a4a';
+  const dark = col.replace(/[0-9a-f]{2}/gi, h=>Math.max(0,parseInt(h,16)-40).toString(16).padStart(2,'0'));
+
+  return `<svg width="${s}" height="${s}" viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
+    <!-- body -->
+    <ellipse cx="30" cy="38" rx="16" ry="14" fill="${col}"/>
+    <!-- head -->
+    <ellipse cx="30" cy="22" rx="13" ry="12" fill="${col}"/>
+    <!-- ears / features -->
+    <ellipse cx="18" cy="18" rx="4" ry="5" fill="${dark}"/>
+    <ellipse cx="42" cy="18" rx="4" ry="5" fill="${dark}"/>
+    <!-- eyes -->
+    <circle cx="25" cy="21" r="2.5" fill="#1a2e0a"/>
+    <circle cx="35" cy="21" r="2.5" fill="#1a2e0a"/>
+    <circle cx="25.8" cy="20.2" r="0.8" fill="white"/>
+    <circle cx="35.8" cy="20.2" r="0.8" fill="white"/>
+    <!-- nose -->
+    <ellipse cx="30" cy="25" rx="2" ry="1.5" fill="${dark}"/>
+    <!-- mouth -->
+    <path d="M27 27.5 Q30 30 33 27.5" stroke="${dark}" stroke-width="1" fill="none" stroke-linecap="round"/>
+    <!-- arms -->
+    <ellipse cx="13" cy="36" rx="4" ry="7" fill="${col}" transform="rotate(-20 13 36)"/>
+    <ellipse cx="47" cy="36" rx="4" ry="7" fill="${col}" transform="rotate(20 47 36)"/>
+    <!-- legs -->
+    <ellipse cx="23" cy="50" rx="5" ry="6" fill="${dark}"/>
+    <ellipse cx="37" cy="50" rx="5" ry="6" fill="${dark}"/>
+    <!-- detail / icon -->
+    <text x="30" y="42" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.6)">${k.icon}</text>
+  </svg>`;
+}
+
+function removeKobito(el, k) {
+  activeKobito = activeKobito.filter(a=>a.el!==el);
+  el.style.opacity = '0';
+  el.style.transition = 'opacity 1s';
+  setTimeout(()=>el.remove(), 1000);
+}
+
+function startSpawning() {
+  spawnKobito();
+  spawnTimer = setInterval(()=>spawnKobito(), 3000+Math.random()*3000);
+}
+
+// ===== CATCH =====
+function catchKobito(el, k) {
+  if(catchPopupOpen) return;
+
+  // remove from active
+  const idx = activeKobito.findIndex(a=>a.el===el);
+  if(idx>=0) {
+    clearTimeout(activeKobito[idx].timer);
+    activeKobito.splice(idx,1);
+  }
+
+  // caught animation
+  el.classList.add('caught-anim');
+  setTimeout(()=>el.remove(), 500);
+
+  // flash
+  const flash = document.getElementById('catch-flash');
+  flash.classList.add('flash');
+  setTimeout(()=>flash.classList.remove('flash'), 200);
+
+  // vibrate
+  if(navigator.vibrate) navigator.vibrate([30,20,60]);
+
+  // record
+  const isNew = !found[k.id];
+  found[k.id] = (found[k.id]||0)+1;
+  saveData();
+  updateCount();
+
+  // show popup
+  showCatchPopup(k, isNew);
+}
+
+function showCatchPopup(k, isNew) {
+  catchPopupOpen = true;
+  document.getElementById('catch-icon').textContent = k.icon;
+  document.getElementById('catch-name').textContent = k.name;
+  document.getElementById('catch-desc').textContent = k.desc;
+  const badge = document.getElementById('catch-new-badge');
+  badge.style.display = isNew ? 'inline-block' : 'none';
+  document.getElementById('catch-popup').classList.add('show');
+}
+
+document.getElementById('catch-close').addEventListener('click', ()=>{
+  document.getElementById('catch-popup').classList.remove('show');
+  catchPopupOpen = false;
+});
+
+// ===== ZUKAN =====
+function buildZukan() {
+  const grid = document.getElementById('zukan-grid');
+  grid.innerHTML = '';
+  const foundCount = Object.keys(found).length;
+  document.getElementById('zukan-progress').textContent =
+    `発見済み ${foundCount} / ${KOBITO_LIST.length} 種`;
+
+  KOBITO_LIST.forEach(k=>{
+    const cell = document.createElement('div');
+    cell.className = 'zukan-cell' + (found[k.id] ? ' found' : '');
+
+    const cnt = found[k.id]||0;
+    cell.innerHTML = `
+      <span class="zukan-cell-icon">${k.icon}</span>
+      <div class="zukan-cell-name">${found[k.id] ? k.name : '???'}</div>
+      <span class="zukan-count-badge">${cnt}回</span>
+    `;
+    grid.appendChild(cell);
+  });
+}
+
+function updateCount() {
+  document.getElementById('kobito-count').textContent = Object.keys(found).length;
+}
+
+document.getElementById('zukan-btn').addEventListener('click', ()=>{
+  buildZukan();
+  document.getElementById('zukan-panel').classList.add('open');
+});
+document.getElementById('zukan-close').addEventListener('click', ()=>{
+  document.getElementById('zukan-panel').classList.remove('open');
+});
+
+// ===== HINTS =====
+function rotateHints() {
+  let i = 0;
+  const el = document.getElementById('hint-text');
+  hintTimer = setInterval(()=>{
+    i = (i+1)%hints.length;
+    el.style.opacity = '0';
+    setTimeout(()=>{ el.textContent = hints[i]; el.style.opacity = '1'; }, 500);
+  }, 5000);
+}
+
+// ===== INIT =====
+loadData();
+updateCount();
+startCamera();
+</script>
+
+</body>
+</html>
